@@ -1,0 +1,13 @@
+double media_aritmetica ( int|double num1 ,  int|double num2, #arg)
+{
+	double result=num1+num2;
+	for item in #arg
+	{
+	result+=item;		
+}
+result/=sup.len+2;
+	return result;
+}
+main(){
+	print(media_aritmetica(1 , 2 , 3 , 4 , 5 , 6.5 , 8.3));
+}
