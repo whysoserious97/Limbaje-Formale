@@ -8,8 +8,17 @@
 
 using namespace std;
 ifstream fin("input.txt");
-
-enum Token {
+/////////////////////////////////////
+struct tokenobj
+{
+    int id;
+    string name;
+    string value;
+};
+vector<tokenobj> objarray;
+struct tokenobj tempTok;
+////////////////////////////////////////
+enum id {
   tok_eof = -1,
 
   // commands
@@ -51,6 +60,9 @@ string my_map[]={"tok_eof","tok_func", "tok_extern", "tok_identifier","tok_numbe
  "tok_main"
  };
 
+     vector< int > tokens;
+    vector<string> tokenstring;
+
 static string IdentifierStr;
 vector <string> arr;
 static double NumVal;
@@ -69,7 +81,7 @@ static int gettok() {
   IdentifierStr = LastChar;
   while (isalnum((LastChar = fin.get()))|| LastChar=='_')
     IdentifierStr += LastChar;
-arr.push_back(IdentifierStr);
+tempTok.value=IdentifierStr;
   if (IdentifierStr == "func")
     return tok_func;
   if (IdentifierStr == "extern")
@@ -94,12 +106,12 @@ arr.push_back(IdentifierStr);
     return tok_identifier;
 }
 if (isdigit(LastChar) || LastChar == '.') {   // Number: [0-9.]+
-  std::string NumStr;
+  string NumStr;
   do {
     NumStr += LastChar;
     LastChar = fin.get();
   } while (isdigit(LastChar) || LastChar == '.');
-    arr.push_back(NumStr);
+    tempTok.value=NumStr;
   NumVal = strtod(NumStr.c_str(), 0);
   if (NumStr==".")
     return tok_property;
@@ -114,7 +126,7 @@ if (LastChar == '$') {
     return gettok();
 }
 intermediar=LastChar;
-arr.push_back(intermediar);
+tempTok.value=intermediar;
 /////////////////////////////////L and R parantheses
 
 if (LastChar == '(') {
@@ -153,13 +165,24 @@ if (LastChar == '+' || LastChar == '-' || LastChar == '*' || LastChar == '/') {
   LastChar=fin.get();
     return tok_arithmetic_oper;
 }
-if (LastChar == '<' || LastChar == '>') {
+if (LastChar == '<' || LastChar == '>' || LastChar == '~') {
   LastChar=fin.get();
+  if(LastChar!='=')
+    return tok_logic_oper;
+    string chars;
+    chars+=LastChar;
+    chars+='=';
+   tempTok.name= chars;
+    LastChar=fin.get();
     return tok_logic_oper;
 }
 if ( LastChar == '=') {
   LastChar=fin.get();
+  if(LastChar!='=')
     return tok_asign;
+   tempTok.value= "==";
+    LastChar=fin.get();
+    return tok_logic_oper;
 }
 /////////////////////////////////Comments
 if (LastChar == '$') {
@@ -184,23 +207,22 @@ return LastChar;
 
 int main()
 {
-    vector< int > tokens;
-    vector<string> tokenstring;
+
     int tok;
 
     while(!fin.eof()){
     tok=gettok();
   //  cout<<tok<<endl;
-    tokens.push_back(tok);
-     tokenstring.push_back(my_map[-tok-1]);
-
+   tempTok.id= tok;
+    tempTok.name = my_map[-tok-1];
+    objarray.push_back(tempTok);
     }
-    for (unsigned i = 0; i < tokenstring.size(); i++) {
-	std::cout << tokenstring.at(i) << '\n';
+    for (unsigned i = 0; i < objarray.size(); i++) {
+	cout <<"id: "<<objarray[i].id<<"\t name: "<< objarray[i].name << "\t = \'" +objarray[i].value <<"\'"<< '\n';
 }
 
-for (unsigned i = 0; i < arr.size(); i++) {
-	std::cout <<"'" << arr.at(i) << "' ";
-}
     return 0;
 }
+//tokkens=id
+//tokenstring=name
+//arr=value
