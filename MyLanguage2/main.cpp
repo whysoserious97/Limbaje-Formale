@@ -60,11 +60,8 @@ string my_map[]={"tok_eof","tok_func", "tok_extern", "tok_identifier","tok_numbe
  "tok_main"
  };
 
-     vector< int > tokens;
-    vector<string> tokenstring;
-
 static string IdentifierStr;
-vector <string> arr;
+
 static double NumVal;
 int parStack=0;
 int brStack=0;
