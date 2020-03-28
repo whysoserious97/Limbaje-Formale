@@ -1,0 +1,12 @@
+# depslib dependency file v1.0
+1585422926 source:c:\users\wildw\documents\mylanguage2\main.cpp
+	<iostream>
+	<string>
+	<ctype.h>
+	<stdlib.h>
+	<stdio.h>
+	<map>
+	<typeinfo>
+	<vector>
+	<fstream>
+
