@@ -1,0 +1,5 @@
+extern sin(arg);
+a=5;
+b=7;
+c=sum(a,b);
+atan2(sin(0.4), cos(42));
