@@ -1,5 +1,8 @@
 extern sin(arg);
-a=5;
+var a;
+var b;
+var c;
+a=3;
 b=7;
-c=sum(a,b);
-atan2(sin(0.4), cos(42));
+c=sum(pow(2,3),b);
+atan2(5,2);
