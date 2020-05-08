@@ -1,7 +1,4 @@
 extern sin(arg);
-var a;
-var b;
-var c;
 a=3;
 b=7;
 c=sum(pow(2,3),b);
