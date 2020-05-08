@@ -4,12 +4,11 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <map>
-#include <typeinfo>
 #include <vector>
 #include<fstream>
 #include <assert.h>
 #include <memory>
-#include <variant>
+
 
 using namespace std;
 
@@ -42,7 +41,7 @@ enum Token {
 
     // primary
     tok_identifier = -4, tok_number = -5,tok_if = -6, tok_then = -7, tok_else = -8,
-    tok_for = -9, tok_in = -10
+    tok_for = -9, tok_in = -10,tok_var = -13
 };
 
 /*string my_map[]={"tok_eof","tok_def", "tok_extern", "tok_identifier","tok_number","tok_LParanteses", "tok_RParanteses",  "tok_LBracket",  "tok_RBracket",  "data_type",  "tok_for",
@@ -59,9 +58,6 @@ enum Token {
 static string IdentifierStr;
 
 static double NumVal;
-int parStack=0;
-int brStack=0;
-bool wasMain=false;
 string intermediar;
 //////////////////////////////////////////
 static int gettok() {
@@ -83,7 +79,7 @@ static int gettok() {
         if (IdentifierStr == "for") return tok_for;
         if (IdentifierStr == "in") return tok_in;
      //   if (IdentifierStr == "binary") return tok_binary;
-     //   if (IdentifierStr == "var") return tok_var;
+        if (IdentifierStr == "var") return tok_var;
         return tok_identifier;
     }
     if (isdigit(LastChar)) {   // Number: [0-9.]+
@@ -129,19 +125,22 @@ namespace {
     class ExprAST {
     public:
         virtual ~ExprAST() = default;
+
     };
-    vector<ExprAST> exparr;
+
 
 /// NumberExprAST - Expression class for numeric literals like "1.0".
     class NumberExprAST : public ExprAST {
-        double Val;
+    public:
+        string Val;
 
     public:
-        NumberExprAST(double Val) : Val(Val) {}
+        NumberExprAST(string Val) : Val(Val) {}
     };
 
 /// VariableExprAST - Expression class for referencing a variable, like "a".
     class VariableExprAST : public ExprAST {
+    public:
         std::string Name;
 
     public:
@@ -150,7 +149,7 @@ namespace {
 
 /// BinaryExprAST - Expression class for a binary operator.
     class BinaryExprAST : public ExprAST {
-        char Op;
+    public:char Op;
         std::unique_ptr<ExprAST> LHS, RHS;
 
     public:
@@ -161,6 +160,7 @@ namespace {
 
 /// CallExprAST - Expression class for function calls.
     class CallExprAST : public ExprAST {
+    public:
         std::string Callee;
         std::vector<std::unique_ptr<ExprAST>> Args;
 
@@ -169,7 +169,25 @@ namespace {
                     std::vector<std::unique_ptr<ExprAST>> Args)
                 : Callee(Callee), Args(std::move(Args)) {}
     };
+    /// IfExprAST - Expression class for if/then/else.
+    class IfExprAST : public ExprAST {
+        ExprAST *Cond, *Then, *Else;
+    public:
+        IfExprAST(ExprAST *cond, ExprAST *then, ExprAST *_else)
+                : Cond(cond), Then(then), Else(_else) {}
 
+    };
+
+/// ForExprAST - Expression class for for/in.
+    class ForExprAST : public ExprAST {
+        std::string VarName;
+        ExprAST *Start, *End, *Step, *Body;
+    public:
+        ForExprAST(const std::string &varname, ExprAST *start, ExprAST *end,
+                   ExprAST *step, ExprAST *body)
+                : VarName(varname), Start(start), End(end), Step(step), Body(body) {}
+
+    };
 /// PrototypeAST - This class represents the "prototype" for a function,
 /// which captures its name, and its argument names (thus implicitly the number
 /// of arguments the function takes).
@@ -185,16 +203,29 @@ namespace {
     };
 
 /// FunctionAST - This class represents a function definition itself.
-    class FunctionAST {
+    class FunctionAST : public ExprAST {
+    public:
         std::unique_ptr<PrototypeAST> Proto;
-        std::unique_ptr<ExprAST> Body;
 
     public:
         FunctionAST(std::unique_ptr<PrototypeAST> Proto,
                     std::unique_ptr<ExprAST> Body)
                 : Proto(std::move(Proto)), Body(std::move(Body)) {}
-    };
 
+        std::unique_ptr<ExprAST> Body;
+    };
+    /// VarExprAST - Expression class for var/in
+    class VarExprAST : public ExprAST {
+    public:
+        std::vector<std::pair<std::string, ExprAST*> > VarNames;
+        ExprAST *Body;
+    public:
+        VarExprAST(const std::vector<std::pair<std::string, ExprAST*> > &varnames,
+                   ExprAST *body)
+                : VarNames(varnames), Body(body) {}
+
+
+    };
 } // end anonymous namespace
 
 //===----------------------------------------------------------------------===//
@@ -205,7 +236,7 @@ namespace {
 /// token the parser is looking at.  getNextToken reads another token from the
 /// lexer and updates CurTok with its results.
 static int CurTok;
-static int getNextToken() { return CurTok = objarray[x++].id; }
+static int getNextToken() { return CurTok = objarray[++x].id; }
 
 /// BinopPrecedence - This holds the precedence for each binary operator that is
 /// defined.
@@ -237,7 +268,7 @@ static std::unique_ptr<ExprAST> ParseExpression();
 
 /// numberexpr ::= number
 static std::unique_ptr<ExprAST> ParseNumberExpr() {
-    auto Result = std::make_unique<NumberExprAST>(NumVal);
+    auto Result = std::make_unique<NumberExprAST>(objarray[x].value);
     getNextToken(); // consume the number
     return std::move(Result);
 }
@@ -259,7 +290,7 @@ static std::unique_ptr<ExprAST> ParseParenExpr() {
 ///   ::= identifier
 ///   ::= identifier '(' expression* ')'
 static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
-    std::string IdName = IdentifierStr;
+    std::string IdName = objarray[x].value;
 
     getNextToken(); // eat identifier.
 
@@ -362,7 +393,7 @@ static std::unique_ptr<PrototypeAST> ParsePrototype() {
     if (CurTok != tok_identifier)
         return LogErrorP("Expected function name in prototype");
 
-    std::string FnName = IdentifierStr;
+    std::string FnName = objarray[x].value;
     getNextToken();
 
     if (CurTok != '(')
@@ -370,7 +401,7 @@ static std::unique_ptr<PrototypeAST> ParsePrototype() {
 
     std::vector<std::string> ArgNames;
     while (getNextToken() == tok_identifier)
-        ArgNames.push_back(IdentifierStr);
+        ArgNames.push_back(objarray[x].value);
     if (CurTok != ')')
         return LogErrorP("Expected ')' in prototype");
 
@@ -391,15 +422,16 @@ static std::unique_ptr<FunctionAST> ParseDefinition() {
         return std::make_unique<FunctionAST>(std::move(Proto), std::move(E));
     return nullptr;
 }
-
+vector<FunctionAST*> exparr;
 /// toplevelexpr ::= expression
-static std::unique_ptr<FunctionAST> ParseTopLevelExpr() {
+static FunctionAST* ParseTopLevelExpr() {
     if (auto E = ParseExpression()) {
         // Make an anonymous proto.
         auto Proto = std::make_unique<PrototypeAST>("__anon_expr",
                                                     std::vector<std::string>());
-        auto func=std::make_unique<FunctionAST>(std::move(Proto), std::move(E));
-       // exparr.push_back(E);
+        auto func=std::make_unique<FunctionAST>(std::move(Proto), std::move(E)).release();
+
+        exparr.push_back(func);
         return func;
     }
     return nullptr;
@@ -416,8 +448,11 @@ static std::unique_ptr<PrototypeAST> ParseExtern() {
 //===----------------------------------------------------------------------===//
 
 static void HandleDefinition() {
-    if (ParseDefinition()) {
-        fprintf(stderr, "Parsed a function definition.\n");
+    auto def = ParseDefinition();
+    if (def) {
+        auto ptr = def.release();
+        exparr.push_back(ptr);
+    //    fprintf(stderr, "Parsed a function definition.\n");
     } else {
         // Skip token for error recovery.
         getNextToken();
@@ -426,7 +461,7 @@ static void HandleDefinition() {
 
 static void HandleExtern() {
     if (ParseExtern()) {
-        fprintf(stderr, "Parsed an extern\n");
+    //    fprintf(stderr, "Parsed an extern\n");
     } else {
         // Skip token for error recovery.
         getNextToken();
@@ -436,7 +471,7 @@ static void HandleExtern() {
 static void HandleTopLevelExpression() {
     // Evaluate a top-level expression into an anonymous function.
     if (ParseTopLevelExpr()) {
-        fprintf(stderr, "Parsed a top-level expr\n");
+      //  fprintf(stderr, "Parsed a top-level expr\n");
     } else {
         // Skip token for error recovery.
         getNextToken();
@@ -465,6 +500,56 @@ static void MainLoop() {
         }
     }
 }
+
+void mostrestrictive(ExprAST* q,int level){
+    auto e=dynamic_cast<BinaryExprAST*>(q);
+    auto var = dynamic_cast<VariableExprAST*>(q);
+    auto call = dynamic_cast<CallExprAST*>(q);
+    auto number = dynamic_cast<NumberExprAST*>(q);
+    auto func = dynamic_cast<FunctionAST *>(q);
+    for (int i = 0; i <level;i++){
+        cout<<'\t';
+    }
+
+    if (e){
+        cout<<"Operator:  "<<e->Op<<endl;
+        mostrestrictive(e->LHS.get(),level+1);
+        mostrestrictive(e->RHS.get(),level+1);
+    } else if(var)
+    {
+        cout<<"Var name:"<<var->Name<<endl;
+
+    } else if(call)
+    {
+        cout<<"Is calling: "<<call->Callee<<endl;
+
+        for(int i=0;i<call->Args.size();i++){
+            for (int j = 0; j <level;j++){
+                cout<<'\t';
+            }
+            cout<<"Parameter:"<<i<<":"<<endl;
+            mostrestrictive(call->Args[i].release(),level+1);
+        }
+    } else if(number){
+        cout<<"Is number with value: "<<number->Val<<endl;
+    }else if(func){
+        mostrestrictive(func,level+1);
+    }
+    else{
+        cout<<"Else"<<endl;
+    }
+    level++;
+}
+template<typename Type>
+void printfunc(Type a){
+    int level=0;
+        if (typeid(a)== typeid(FunctionAST*)){
+            FunctionAST* b = (FunctionAST*) a;
+            auto x = b->Body.release();
+            mostrestrictive(x,level);
+        }
+
+}
 int main()
 {
 
@@ -479,7 +564,7 @@ int main()
     int tok;
     while(!fin.eof()){
         tok=gettok();
-        cout<<tok<<'\n';
+    //    cout<<tok<<'\n';
         //  cout<<tok<<endl;
         tempTok.id= tok;
 
@@ -490,13 +575,14 @@ int main()
     tempTok.value="EOF";
     objarray.push_back(tempTok);
 
-    for (unsigned i = 0; i < objarray.size(); i++) {
+   /* for (unsigned i = 0; i < objarray.size(); i++) {
         cout <<"id: "<<objarray[i].id<<"\t "<< "\t = \'" +objarray[i].value <<"\'"<< '\n';
     }
+    */
     getNextToken();
     MainLoop();
-    for(int i=0;i<exparr.size();i++)
-        cout<<"exparr[i]";
-cout<<exparr.size();
+    for(int i=0;i<exparr.size();i++) {
+        printfunc(exparr[i]);
+    }
     return 0;
 }
