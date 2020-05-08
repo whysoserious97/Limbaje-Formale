@@ -19,7 +19,7 @@ inline bool instanceof(const T*) {
 }
 
 
-int x=0;   //current index of parsing
+int x=-1;   //current index of parsing
 
 
 ifstream fin("input.txt");
@@ -40,8 +40,17 @@ enum Token {
     tok_def = -2, tok_extern = -3,
 
     // primary
-    tok_identifier = -4, tok_number = -5,tok_if = -6, tok_then = -7, tok_else = -8,
-    tok_for = -9, tok_in = -10,tok_var = -13
+    tok_identifier = -4, tok_number = -5,
+
+    // control
+    tok_if = -6, tok_then = -7, tok_else = -8,
+    tok_for = -9, tok_in = -10,
+
+    // operators
+    tok_binary = -11, tok_unary = -12,
+
+    // var definition
+    tok_var = -13
 };
 
 /*string my_map[]={"tok_eof","tok_def", "tok_extern", "tok_identifier","tok_number","tok_LParanteses", "tok_RParanteses",  "tok_LBracket",  "tok_RBracket",  "data_type",  "tok_for",
@@ -124,7 +133,7 @@ namespace {
 /// ExprAST - Base class for all expression nodes.
     class ExprAST {
     public:
-        virtual ~ExprAST() = default;
+        virtual ~ExprAST() {}
 
     };
 
@@ -133,7 +142,6 @@ namespace {
     class NumberExprAST : public ExprAST {
     public:
         string Val;
-
     public:
         NumberExprAST(string Val) : Val(Val) {}
     };
@@ -146,31 +154,39 @@ namespace {
     public:
         VariableExprAST(const std::string &Name) : Name(Name) {}
     };
+/// UnaryExprAST - Expression class for a unary operator.
+    class UnaryExprAST : public ExprAST {
+    public:
+        char Opcode;
+        ExprAST *Operand;
+    public:
+        UnaryExprAST(char opcode, ExprAST *operand)
+                : Opcode(opcode), Operand(operand) {}
 
+    };
 /// BinaryExprAST - Expression class for a binary operator.
     class BinaryExprAST : public ExprAST {
     public:char Op;
-        std::unique_ptr<ExprAST> LHS, RHS;
+        ExprAST *LHS, *RHS;
 
     public:
-        BinaryExprAST(char Op, std::unique_ptr<ExprAST> LHS,
-                      std::unique_ptr<ExprAST> RHS)
-                : Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
+        BinaryExprAST(char op, ExprAST *lhs, ExprAST *rhs)
+                : Op(op), LHS(lhs), RHS(rhs) {}
     };
 
 /// CallExprAST - Expression class for function calls.
     class CallExprAST : public ExprAST {
     public:
         std::string Callee;
-        std::vector<std::unique_ptr<ExprAST>> Args;
+        std::vector<ExprAST*> Args;
 
     public:
-        CallExprAST(const std::string &Callee,
-                    std::vector<std::unique_ptr<ExprAST>> Args)
-                : Callee(Callee), Args(std::move(Args)) {}
+        CallExprAST(const std::string &callee, std::vector<ExprAST*> &args)
+                : Callee(callee), Args(args) {}
     };
     /// IfExprAST - Expression class for if/then/else.
     class IfExprAST : public ExprAST {
+    public:
         ExprAST *Cond, *Then, *Else;
     public:
         IfExprAST(ExprAST *cond, ExprAST *then, ExprAST *_else)
@@ -180,6 +196,7 @@ namespace {
 
 /// ForExprAST - Expression class for for/in.
     class ForExprAST : public ExprAST {
+    public:
         std::string VarName;
         ExprAST *Start, *End, *Step, *Body;
     public:
@@ -188,42 +205,55 @@ namespace {
                 : VarName(varname), Start(start), End(end), Step(step), Body(body) {}
 
     };
+    /// VarExprAST - Expression class for var/in
+    class VarExprAST : public ExprAST {
+    public:
+    public:
+        std::vector<std::pair<std::string, ExprAST*> > VarNames;
+     //   ExprAST *Body;
+    public:
+        VarExprAST(const std::vector<std::pair<std::string, ExprAST*> > &varnames
+                   )
+                : VarNames(varnames) {}
+
+
+    };
 /// PrototypeAST - This class represents the "prototype" for a function,
-/// which captures its name, and its argument names (thus implicitly the number
-/// of arguments the function takes).
+/// which captures its argument names as well as if it is an operator.
     class PrototypeAST {
         std::string Name;
         std::vector<std::string> Args;
-
+        bool isOperator;
+        unsigned Precedence;  // Precedence if a binary op.
     public:
-        PrototypeAST(const std::string &Name, std::vector<std::string> Args)
-                : Name(Name), Args(std::move(Args)) {}
+        PrototypeAST(const std::string &name, const std::vector<std::string> &args,
+                     bool isoperator = false, unsigned prec = 0)
+                : Name(name), Args(args), isOperator(isoperator), Precedence(prec) {}
 
-        const std::string &getName() const { return Name; }
+        bool isUnaryOp() const { return isOperator && Args.size() == 1; }
+        bool isBinaryOp() const { return isOperator && Args.size() == 2; }
+
+        char getOperatorName() const {
+            assert(isUnaryOp() || isBinaryOp());
+            return Name[Name.size()-1];
+        }
+
+        unsigned getBinaryPrecedence() const { return Precedence; }
+
+
+
+        //void CreateArgumentAllocas(Function *F);
     };
 
 /// FunctionAST - This class represents a function definition itself.
     class FunctionAST : public ExprAST {
     public:
-        std::unique_ptr<PrototypeAST> Proto;
-
-    public:
-        FunctionAST(std::unique_ptr<PrototypeAST> Proto,
-                    std::unique_ptr<ExprAST> Body)
-                : Proto(std::move(Proto)), Body(std::move(Body)) {}
-
-        std::unique_ptr<ExprAST> Body;
-    };
-    /// VarExprAST - Expression class for var/in
-    class VarExprAST : public ExprAST {
-    public:
-        std::vector<std::pair<std::string, ExprAST*> > VarNames;
+        PrototypeAST *Proto;
         ExprAST *Body;
-    public:
-        VarExprAST(const std::vector<std::pair<std::string, ExprAST*> > &varnames,
-                   ExprAST *body)
-                : VarNames(varnames), Body(body) {}
 
+    public:
+        FunctionAST(PrototypeAST *proto, ExprAST *body)
+                : Proto(proto), Body(body) {}
 
     };
 } // end anonymous namespace
@@ -255,63 +285,36 @@ static int GetTokPrecedence() {
 }
 
 /// LogError* - These are little helper functions for error handling.
-std::unique_ptr<ExprAST> LogError(const char *Str) {
-    fprintf(stderr, "Error: %s\n", Str);
-    return nullptr;
-}
-std::unique_ptr<PrototypeAST> LogErrorP(const char *Str) {
-    LogError(Str);
-    return nullptr;
-}
+/// Error* - These are little helper functions for error handling.
+ExprAST *Error(const char *Str) { fprintf(stderr, "Error: %s\n", Str);return 0;}
+PrototypeAST *ErrorP(const char *Str) { Error(Str); return 0; }
+FunctionAST *ErrorF(const char *Str) { Error(Str); return 0; }
 
-static std::unique_ptr<ExprAST> ParseExpression();
-
-/// numberexpr ::= number
-static std::unique_ptr<ExprAST> ParseNumberExpr() {
-    auto Result = std::make_unique<NumberExprAST>(objarray[x].value);
-    getNextToken(); // consume the number
-    return std::move(Result);
-}
-
-/// parenexpr ::= '(' expression ')'
-static std::unique_ptr<ExprAST> ParseParenExpr() {
-    getNextToken(); // eat (.
-    auto V = ParseExpression();
-    if (!V)
-        return nullptr;
-
-    if (CurTok != ')')
-        return LogError("expected ')'");
-    getNextToken(); // eat ).
-    return V;
-}
-
+static ExprAST *ParseExpression();
 /// identifierexpr
 ///   ::= identifier
 ///   ::= identifier '(' expression* ')'
-static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
+static ExprAST *ParseIdentifierExpr() {
     std::string IdName = objarray[x].value;
 
-    getNextToken(); // eat identifier.
+    getNextToken();  // eat identifier.
 
     if (CurTok != '(') // Simple variable ref.
-        return std::make_unique<VariableExprAST>(IdName);
+        return new VariableExprAST(IdName);
 
     // Call.
-    getNextToken(); // eat (
-    std::vector<std::unique_ptr<ExprAST>> Args;
+    getNextToken();  // eat (
+    std::vector<ExprAST*> Args;
     if (CurTok != ')') {
         while (true) {
-            if (auto Arg = ParseExpression())
-                Args.push_back(std::move(Arg));
-            else
-                return nullptr;
+            ExprAST *Arg = ParseExpression();
+            if (!Arg) return 0;
+            Args.push_back(Arg);
 
-            if (CurTok == ')')
-                break;
+            if (CurTok == ')') break;
 
             if (CurTok != ',')
-                return LogError("Expected ')' or ',' in argument list");
+                return Error("Expected ')' or ',' in argument list");
             getNextToken();
         }
     }
@@ -319,32 +322,180 @@ static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
     // Eat the ')'.
     getNextToken();
 
-    return std::make_unique<CallExprAST>(IdName, std::move(Args));
+    return new CallExprAST(IdName, Args);
+}
+
+/// numberexpr ::= number
+static ExprAST *ParseNumberExpr() {
+    ExprAST *Result = new NumberExprAST(objarray[x].value);
+    getNextToken(); // consume the number
+    return Result;
+}
+/// parenexpr ::= '(' expression ')'
+static ExprAST *ParseParenExpr() {
+    getNextToken();  // eat (.
+    ExprAST *V = ParseExpression();
+    if (!V) return 0;
+
+    if (CurTok != ')')
+        return Error("expected ')'");
+    getNextToken();  // eat ).
+    return V;
+}
+
+/// ifexpr ::= 'if' expression 'then' expression 'else' expression
+static ExprAST *ParseIfExpr() {
+    getNextToken();  // eat the if.
+
+    // condition.
+    ExprAST *Cond = ParseExpression();
+    if (!Cond) return 0;
+
+    if (CurTok != tok_then)
+        return Error("expected then");
+    getNextToken();  // eat the then
+
+    ExprAST *Then = ParseExpression();
+    if (Then == 0) return 0;
+
+    if (CurTok != tok_else)
+        return Error("expected else");
+
+    getNextToken();
+
+    ExprAST *Else = ParseExpression();
+    if (!Else) return 0;
+
+    return new IfExprAST(Cond, Then, Else);
+}
+
+/// forexpr ::= 'for' identifier '=' expr ',' expr (',' expr)? 'in' expression
+static ExprAST *ParseForExpr() {
+    getNextToken();  // eat the for.
+
+    if (CurTok != tok_identifier)
+        return Error("expected identifier after for");
+
+    std::string IdName = IdentifierStr;
+    getNextToken();  // eat identifier.
+
+    if (CurTok != '=')
+        return Error("expected '=' after for");
+    getNextToken();  // eat '='.
+
+
+    ExprAST *Start = ParseExpression();
+    if (Start == 0) return 0;
+    if (CurTok != ',')
+        return Error("expected ',' after for start value");
+    getNextToken();
+
+    ExprAST *End = ParseExpression();
+    if (End == 0) return 0;
+
+    // The step value is optional.
+    ExprAST *Step = 0;
+    if (CurTok == ',') {
+        getNextToken();
+        Step = ParseExpression();
+        if (Step == 0) return 0;
+    }
+
+    if (CurTok != tok_in)
+        return Error("expected 'in' after for");
+    getNextToken();  // eat 'in'.
+
+    ExprAST *Body = ParseExpression();
+    if (Body == 0) return 0;
+
+    return new ForExprAST(IdName, Start, End, Step, Body);
+}
+
+/// varexpr ::= 'var' identifier ('=' expression)?
+//                    (',' identifier ('=' expression)?)* 'in' expression
+static ExprAST *ParseVarExpr() {
+    getNextToken();  // eat the var.
+
+    std::vector<std::pair<std::string, ExprAST*> > VarNames;
+
+    // At least one variable name is required.
+    if (CurTok != tok_identifier)
+        return Error("expected identifier after var");
+
+    while (1) {
+        std::string Name = objarray[x].value;
+        getNextToken();  // eat identifier.
+
+        // Read the optional initializer.
+        ExprAST *Init = 0;
+        if (CurTok == '=') {
+            getNextToken(); // eat the '='.
+
+            Init = ParseExpression();
+            if (Init == 0) return 0;
+        }
+
+        VarNames.push_back(std::make_pair(Name, Init));
+
+        // End of var list, exit loop.
+        if (CurTok != ',') break;
+        getNextToken(); // eat the ','.
+
+        if (CurTok != tok_identifier)
+            return Error("expected identifier list after var");
+    }
+
+   /* // At this point, we have to have 'in'.
+    if (CurTok != tok_in)
+        return Error("expected 'in' keyword after 'var'");
+    getNextToken();  // eat 'in'.
+
+    ExprAST *Body = ParseExpression();
+    if (Body == 0) return 0;*/
+
+    return new VarExprAST(VarNames); //return new VarExprAST(VarNames, Body);
 }
 
 /// primary
 ///   ::= identifierexpr
 ///   ::= numberexpr
 ///   ::= parenexpr
-static std::unique_ptr<ExprAST> ParsePrimary() {
+///   ::= ifexpr
+///   ::= forexpr
+///   ::= varexpr
+static ExprAST *ParsePrimary() {
     switch (CurTok) {
-        default:
-            return LogError("unknown token when expecting an expression");
-        case tok_identifier:
-            return ParseIdentifierExpr();
-        case tok_number:
-            return ParseNumberExpr();
-        case '(':
-            return ParseParenExpr();
+        default: return Error("unknown token when expecting an expression");
+        case tok_identifier: return ParseIdentifierExpr();
+        case tok_number:     return ParseNumberExpr();
+        case '(':            return ParseParenExpr();
+        case tok_if:         return ParseIfExpr();
+        case tok_for:        return ParseForExpr();
+        case tok_var:        return ParseVarExpr();
     }
 }
 
+/// unary
+///   ::= primary
+///   ::= '!' unary
+static ExprAST *ParseUnary() {
+    // If the current token is not an operator, it must be a primary expr.
+    if (!isascii(CurTok) || CurTok == '(' || CurTok == ',')
+        return ParsePrimary();
+
+    // If this is a unary operator, read it.
+    int Opc = CurTok;
+    getNextToken();
+    if (ExprAST *Operand = ParseUnary())
+        return new UnaryExprAST(Opc, Operand);
+    return 0;
+}
+
 /// binoprhs
-///   ::= ('+' primary)*
-static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
-                                              std::unique_ptr<ExprAST> LHS) {
+///   ::= ('+' unary)*
+static ExprAST *ParseBinOpRHS(int ExprPrec, ExprAST *LHS) {
     // If this is a binop, find its precedence.
-    while (true) {
+    while (1) {
         int TokPrec = GetTokPrecedence();
 
         // If this is a binop that binds at least as tightly as the current binop,
@@ -354,77 +505,128 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
 
         // Okay, we know this is a binop.
         int BinOp = CurTok;
-        getNextToken(); // eat binop
+        getNextToken();  // eat binop
 
-        // Parse the primary expression after the binary operator.
-        auto RHS = ParsePrimary();
-        if (!RHS)
-            return nullptr;
+        // Parse the unary expression after the binary operator.
+        ExprAST *RHS = ParseUnary();
+        if (!RHS) return 0;
 
         // If BinOp binds less tightly with RHS than the operator after RHS, let
         // the pending operator take RHS as its LHS.
         int NextPrec = GetTokPrecedence();
         if (TokPrec < NextPrec) {
-            RHS = ParseBinOpRHS(TokPrec + 1, std::move(RHS));
-            if (!RHS)
-                return nullptr;
+            RHS = ParseBinOpRHS(TokPrec+1, RHS);
+            if (RHS == 0) return 0;
         }
 
         // Merge LHS/RHS.
-        LHS = std::make_unique<BinaryExprAST>(BinOp, std::move(LHS),
-                                              std::move(RHS));
+        LHS = new BinaryExprAST(BinOp, LHS, RHS);
     }
 }
 
 /// expression
-///   ::= primary binoprhs
+///   ::= unary binoprhs
 ///
-static std::unique_ptr<ExprAST> ParseExpression() {
-    auto LHS = ParsePrimary();
-    if (!LHS)
-        return nullptr;
+static ExprAST *ParseExpression() {
+    ExprAST *LHS = ParseUnary();
+    if (!LHS) return 0;
 
-    return ParseBinOpRHS(0, std::move(LHS));
+    return ParseBinOpRHS(0, LHS);
 }
 
 /// prototype
 ///   ::= id '(' id* ')'
-static std::unique_ptr<PrototypeAST> ParsePrototype() {
-    if (CurTok != tok_identifier)
-        return LogErrorP("Expected function name in prototype");
+static PrototypeAST *ParsePrototype() {
+    std::string FnName;
 
-    std::string FnName = objarray[x].value;
-    getNextToken();
+    unsigned Kind = 0; // 0 = identifier, 1 = unary, 2 = binary.
+    unsigned BinaryPrecedence = 30;
+
+    switch (CurTok) {
+        default:
+            return ErrorP("Expected function name in prototype");
+        case tok_identifier:
+            FnName = IdentifierStr;
+            Kind = 0;
+            getNextToken();
+            break;
+        case tok_unary:
+            getNextToken();
+            if (!isascii(CurTok))
+                return ErrorP("Expected unary operator");
+            FnName = "unary";
+            FnName += (char)CurTok;
+            Kind = 1;
+            getNextToken();
+            break;
+        case tok_binary:
+            getNextToken();
+            if (!isascii(CurTok))
+                return ErrorP("Expected binary operator");
+            FnName = "binary";
+            FnName += (char)CurTok;
+            Kind = 2;
+            getNextToken();
+
+            // Read the precedence if present.
+            if (CurTok == tok_number) {
+                if (NumVal < 1 || NumVal > 100)
+                    return ErrorP("Invalid precedecnce: must be 1..100");
+                BinaryPrecedence = (unsigned)NumVal;
+                getNextToken();
+            }
+            break;
+    }
 
     if (CurTok != '(')
-        return LogErrorP("Expected '(' in prototype");
+        return ErrorP("Expected '(' in prototype");
 
     std::vector<std::string> ArgNames;
     while (getNextToken() == tok_identifier)
-        ArgNames.push_back(objarray[x].value);
+        ArgNames.push_back(IdentifierStr);
     if (CurTok != ')')
-        return LogErrorP("Expected ')' in prototype");
+        return ErrorP("Expected ')' in prototype");
 
     // success.
-    getNextToken(); // eat ')'.
+    getNextToken();  // eat ')'.
 
-    return std::make_unique<PrototypeAST>(FnName, std::move(ArgNames));
+    // Verify right number of names for operator.
+    if (Kind && ArgNames.size() != Kind)
+        return ErrorP("Invalid number of operands for operator");
+
+    return new PrototypeAST(FnName, ArgNames, Kind != 0, BinaryPrecedence);
 }
 
 /// definition ::= 'def' prototype expression
-static std::unique_ptr<FunctionAST> ParseDefinition() {
-    getNextToken(); // eat def.
-    auto Proto = ParsePrototype();
-    if (!Proto)
-        return nullptr;
+static FunctionAST *ParseDefinition() {
+    getNextToken();  // eat def.
+    PrototypeAST *Proto = ParsePrototype();
+    if (Proto == 0) return 0;
 
-    if (auto E = ParseExpression())
-        return std::make_unique<FunctionAST>(std::move(Proto), std::move(E));
-    return nullptr;
+    if (ExprAST *E =
+            ParseExpression())
+        return new FunctionAST(Proto, E);
+    return 0;
 }
-vector<FunctionAST*> exparr;
+vector<ExprAST*> exparr;
 /// toplevelexpr ::= expression
-static FunctionAST* ParseTopLevelExpr() {
+static FunctionAST *ParseTopLevelExpr() {
+    if (ExprAST *E = ParseExpression()) {
+        // Make an anonymous proto.
+        auto Proto = new PrototypeAST("", std::vector<std::string>());
+        auto func =new FunctionAST(Proto, E);
+        exparr.push_back(func);
+        return func;
+    }
+    return 0;
+}
+
+/// external ::= 'extern' prototype
+static PrototypeAST *ParseExtern() {
+    getNextToken();  // eat extern.
+    return ParsePrototype();
+}
+/*static FunctionAST* ParseTopLevelExpr() {
     if (auto E = ParseExpression()) {
         // Make an anonymous proto.
         auto Proto = std::make_unique<PrototypeAST>("__anon_expr",
@@ -441,7 +643,8 @@ static FunctionAST* ParseTopLevelExpr() {
 static std::unique_ptr<PrototypeAST> ParseExtern() {
     getNextToken(); // eat extern.
     return ParsePrototype();
-}
+}*/
+
 
 //===----------------------------------------------------------------------===//
 // Top-Level parsing
@@ -450,8 +653,7 @@ static std::unique_ptr<PrototypeAST> ParseExtern() {
 static void HandleDefinition() {
     auto def = ParseDefinition();
     if (def) {
-        auto ptr = def.release();
-        exparr.push_back(ptr);
+      //  exparr.push_back(def);
     //    fprintf(stderr, "Parsed a function definition.\n");
     } else {
         // Skip token for error recovery.
@@ -507,14 +709,18 @@ void mostrestrictive(ExprAST* q,int level){
     auto call = dynamic_cast<CallExprAST*>(q);
     auto number = dynamic_cast<NumberExprAST*>(q);
     auto func = dynamic_cast<FunctionAST *>(q);
+    auto unary = dynamic_cast<UnaryExprAST *>(q);
+    auto var2 = dynamic_cast<VarExprAST*>(q);
+    auto if_fun = dynamic_cast<IfExprAST*>(q);
+    auto for_fun = dynamic_cast<ForExprAST*>(q);
     for (int i = 0; i <level;i++){
         cout<<'\t';
     }
 
     if (e){
         cout<<"Operator:  "<<e->Op<<endl;
-        mostrestrictive(e->LHS.get(),level+1);
-        mostrestrictive(e->RHS.get(),level+1);
+        mostrestrictive(e->LHS,level+1);
+        mostrestrictive(e->RHS,level+1);
     } else if(var)
     {
         cout<<"Var name:"<<var->Name<<endl;
@@ -528,26 +734,53 @@ void mostrestrictive(ExprAST* q,int level){
                 cout<<'\t';
             }
             cout<<"Parameter:"<<i<<":"<<endl;
-            mostrestrictive(call->Args[i].release(),level+1);
+            mostrestrictive(call->Args[i],level+1);
         }
     } else if(number){
         cout<<"Is number with value: "<<number->Val<<endl;
     }else if(func){
-        mostrestrictive(func,level+1);
+        mostrestrictive(func->Body,level);
+    } else if(unary){
+        cout<<unary->Opcode<<endl;
+        mostrestrictive(unary->Operand,level);
+    }else if(var2){
+        for(int j=0;j<var2->VarNames.size();j++){
+            for (int j = 0; j <level;j++){
+                cout<<'\t';
+            }
+            cout<<"Declared:"<<var2->VarNames[j].first<<endl;
+            mostrestrictive(var2->VarNames[j].second,level);
+        }
+
+    }
+    else if (if_fun){
+        cout<<"Condition:"<<endl;
+        mostrestrictive(if_fun->Cond,level);
+        cout<<"Then:"<<endl;
+        mostrestrictive(if_fun->Then,level);
+        cout<<"Else:"<<endl;
+        mostrestrictive(if_fun->Else,level);
+    }
+    else if (for_fun){
+        cout<<"Body:"<<endl;
+        mostrestrictive(for_fun->Body,level);
+        cout<<"Start:"<<endl;
+        mostrestrictive(for_fun->Start,level);
+        cout<<"End:"<<endl;
+        mostrestrictive(for_fun->End,level);
+        cout<<"Step:"<<endl;
+        mostrestrictive(for_fun->Step,level);
     }
     else{
-        cout<<"Else"<<endl;
+        cout<<"Value is NULL"<<endl;
     }
     level++;
 }
-template<typename Type>
-void printfunc(Type a){
+//template<typename Type>
+void printfunc(ExprAST *a){
     int level=0;
-        if (typeid(a)== typeid(FunctionAST*)){
-            FunctionAST* b = (FunctionAST*) a;
-            auto x = b->Body.release();
-            mostrestrictive(x,level);
-        }
+            mostrestrictive(a,level);
+
 
 }
 int main()
